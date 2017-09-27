@@ -3,7 +3,7 @@ let
 in { pkgs }:
   pkgs.stdenv.mkDerivation {
     name = "consul-scripting-helper";
-    buildInputs = [ (pkgs.python36.withPackages (pythonPackages: with pythonPackages; [ consul six requests2 ])) ];
+    buildInputs = [ (pkgs.python36.withPackages (pythonPackages: with pythonPackages; [ consul six requests ])) ];
     unpackPhase = "true";
     installPhase = ''
       mkdir -p $out/bin

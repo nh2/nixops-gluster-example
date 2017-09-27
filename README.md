@@ -52,7 +52,7 @@ Run
 
 ```
 nixops create -d gluster-test-deployment '<example-gluster-cluster.nix>'
-env NIX_PATH=.:nixpkgs=https://github.com/nh2/nixpkgs/archive/70840fb4.tar.gz nixops deploy -d gluster-test
+env NIX_PATH=.:nixpkgs=https://github.com/nh2/nixpkgs/archive/8c77e05b.tar.gz nixops deploy -d gluster-test
 ```
 
 This should complete without errors and you should have your gluster cluster ready.
