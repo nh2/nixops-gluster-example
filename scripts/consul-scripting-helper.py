@@ -3,6 +3,8 @@
 import argparse
 import consul
 import logging
+import signal
+import socket
 import subprocess
 import sys
 import time
@@ -10,22 +12,41 @@ import time
 from requests.exceptions import ConnectionError
 
 
+# Prefer waitForSession instead, see:
+#   https://github.com/hashicorp/consul/issues/819#issuecomment-319745456
 def waitForLeader(args):
   c = consul.Consul()
 
-  got_leader = False
-  while not got_leader:
+  while True:
     try:
       leader_output = c.status.leader()
       if leader_output != '':
         logging.debug("got leader: {0}".format(leader_output))
         got_leader = True
+        break
       else:
         logging.debug("got empty leader, retrying")
     except ConnectionError:
       logging.info("got connection error when trying to connect to consul, retrying")
     except consul.ConsulException:
       logging.info("got consul error when trying to get leader, retrying")
+    time.sleep(0.1)
+
+
+def waitForSession(args):
+  c = consul.Consul()
+
+  while True:
+    try:
+      logging.debug("trying to get session")
+      session = c.session.create(name="consul-scripting-helper waitForSession")
+      logging.debug("got session")
+      c.session.destroy(session)
+      break
+    except ConnectionError:
+      logging.info("got connection error when trying to connect to consul, retrying")
+    except consul.base.ConsulException:
+      logging.info("got consul error when trying to create session, retrying")
     time.sleep(0.1)
 
 
@@ -41,7 +62,7 @@ def locked_action(key, f):
 
   session = None
   try:
-    session = c.session.create()
+    session = c.session.create(name="consul-scripting-helper locked_action " + key)
 
     # Acquire lock
     acquired = False
@@ -57,7 +78,13 @@ def locked_action(key, f):
           logging.debug("lock is already held by session '{0}', retrying".format(data['Session']))
           continue
 
-      acquired = c.kv.put(lockKey, '', acquire=session, flags=lockFlagValue)
+      acquired = c.kv.put(lockKey, socket.gethostname(), acquire=session, flags=lockFlagValue)
+
+    # Now we have the lock.
+
+    # We need to track the index at which we acquired it, so that we can pass
+    # that to `delete` below.
+    acquired_index, _ = c.kv.get(lockKey, consistency='consistent')
 
     try:
       # Perform action.
@@ -67,28 +94,24 @@ def locked_action(key, f):
       raise
     finally:
 
-      # Release lock
-      released = c.kv.put(lockKey, '', release=session, flags=lockFlagValue)
-      if not released:
-        raise Exception('failed to release lock (lockKey: {0})'.format(lockKey))
+      # Delete lock key (which will automatically release the lock)
 
-      # Delete lock key if possible
-      index, data = c.kv.get(lockKey, consistency='consistent')
-      logging.debug("'get' returned: {0}".format((index, data)))
-      if data is not None:  # Nothing to do if the lock does not exist; same as https://github.com/hashicorp/consul/blob/v0.8.3/api/lock.go#L305
-        if data['Flags'] != lockFlagValue:  # same as https://github.com/hashicorp/consul/blob/v0.8.3/api/lock.go#L310
-          raise Exception('Existing key does not match lock use (lockKey: {0})'.format(lockKey))
-        did_delete = c.kv.delete(lockKey, cas=index)
-        # We don't do anything if the lockKey wasn't deleted; if it wasn't, somebody else has already acquired the lock again.
-        # This is different from https://github.com/hashicorp/consul/blob/v0.8.3/api/lock.go#L325 which errors in this case.
-        if did_delete:
-          logging.debug("deleted lock")
-        else:
-          logging.debug("lock deletion failed; probably the lock was already re-acquired by somebody else")
+      # We need to call `delete` with `cas=acquired_index`, so that we can
+      # only delete if nobody else has acquired it since (otherwise we would
+      # be deleting their lock under their feet).
+      # We _should_ own the lock, but it may not be so if an operator or health
+      # check forcefully took it away from us. In that case don't want
+      # the program to continue as an assumption is violated, so we raise.
+      did_delete = c.kv.delete(lockKey, cas=acquired_index)
+      if did_delete:
+        logging.debug("deleted lock")
+      else:
+        raise Exception('lock deletion failed; perhaps an operator or health check took the lock way from us (lockKey: {0})'.format(lockKey))
 
-    c.session.destroy(session)
+      c.session.destroy(session)
   except:
     if session is not None:
+      logging.error('Exception while holding consul session, destroying session')
       c.session.destroy(session)
     raise
 
@@ -175,6 +198,9 @@ def main():
   parser_waitForLeader = subparsers.add_parser('waitForLeader', help='wait until a leader is available')
   parser_waitForLeader.set_defaults(func=waitForLeader)
 
+  parser_waitForSession = subparsers.add_parser('waitForSession', help='wait until a session could be started')
+  parser_waitForSession.set_defaults(func=waitForSession)
+
   parser_lockedCommand = subparsers.add_parser('lockedCommand', help='run a shell command wrapped in a distributed lock; similar to `consul lock`, but exits with the exit code of the child command')
   parser_lockedCommand.add_argument('--key', type=str, required=True, help='the consul key under which to create the lock')
   parser_lockedCommand.add_argument('--shell-command', type=str, required=True, help='command to run')
@@ -198,6 +224,11 @@ def main():
 
   if args.verbose:
     logging.getLogger().setLevel(logging.DEBUG)
+
+  # Translate SIGTERM to SystemExit exception so that we can implement cleanup
+  # actions such as destroying consul sessions.
+  # See https://docs.python.org/3/library/exceptions.html#SystemExit
+  signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(143))
 
   args.func(args)
 
