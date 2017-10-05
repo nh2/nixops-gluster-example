@@ -246,7 +246,7 @@ in {
         # that's why we serialise them with `lockedCommand`.
 
         echo "Check whether volume '${cfg.glusterVolumeName}' already exists; exiting early if so..."
-        (${consul-scripting-helper-exe} lockedCommand --key "glusterfs-${cfg.glusterVolumeName}-command-lock" --shell-command '${pkgs.glusterfs}/bin/gluster volume status ${cfg.glusterVolumeName}') && echo "Exiting because volume already exists" && exit 0
+        ${consul-scripting-helper-exe} lockedCommand --key "glusterfs-${cfg.glusterVolumeName}-command-lock" --shell-command '${pkgs.glusterfs}/bin/gluster volume status ${cfg.glusterVolumeName}' && echo "Exiting because volume already exists" && exit 0
 
         echo "Waiting for all machines to be up before probing..."
         ${consul-scripting-helper-exe} counterIncrement --key "glusterfs-${cfg.glusterVolumeName}-machine-up-counter"
