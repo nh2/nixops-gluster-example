@@ -82,7 +82,7 @@ let
       ./modules/nh2-tinc.nix
       ./modules/nh2-consul-over-tinc.nix
       ./modules/nh2-openssl-dhparams.nix
-      ./modules/nh2-glusterfs-server.nix
+      # ./modules/nh2-glusterfs-server.nix
     ];
 
     nixpkgs.config.packageOverrides = packageOverrides;
@@ -166,77 +166,77 @@ let
       text = builtins.readFile ./example-secrets/glusterfs/nh2-gluster-georep-ssh-key;
     };
 
-    services.nh2-gluster-server = {
-      enable = true;
-      allGlusterServerHosts = glusterClusterHosts;
-      thisGlusterServerHost = vpnIPAddress;
-      glusterTlsSettings = {
-        caCert = ./example-secrets/pki/example-root-ca-cert.pem;
-        # TODO Use .path here, inline sslPrivateKeyNixopsKeyName into `deployment.keys` above when https://github.com/NixOS/nixops/issues/646 is implemented
-        tlsKeyPath = "/var/run/keys/${sslPrivateKeyNixopsKeyName}";
-        tlsPem = ./example-secrets/pki/example-gluster-server-cert.pem;
-      };
-      glusterServiceSettings = {
-        # logLevel = "DEBUG";
-      };
-      glusterVolumeName = glusterVolumeName;
-      volumeReadySignalConsulKey = "nh2.distfs.${glusterVolumeName}.ready";
-      brickFsPath = brickFsPath;
-      numReplicas = numReplicas;
-      sslAllows = sslAllows;
-      geoReplicationMasterSettings =
-        if isGeoReplicationMaster then {
-          slaveHosts = geoReplicationMasterSettings.slaveHosts;
-          slaveVolumeName = geoReplicationMasterSettings.slaveVolumeName;
-          # TODO Use .path here, inline masterToSlaveRootSshPrivateKeyNixopsKeyName into `deployment.keys` above when https://github.com/NixOS/nixops/issues/646 is implemented
-          masterToSlaveRootSshPrivateKeyPathOnMasterServer = "/var/run/keys/${masterToSlaveRootSshPrivateKeyNixopsKeyName}";
-        } else null;
-      geoReplicationSlaveSettings = geoReplicationSlaveSettings;
-    };
+    # services.nh2-gluster-server = {
+    #   enable = true;
+    #   allGlusterServerHosts = glusterClusterHosts;
+    #   thisGlusterServerHost = vpnIPAddress;
+    #   glusterTlsSettings = {
+    #     caCert = ./example-secrets/pki/example-root-ca-cert.pem;
+    #     # TODO Use .path here, inline sslPrivateKeyNixopsKeyName into `deployment.keys` above when https://github.com/NixOS/nixops/issues/646 is implemented
+    #     tlsKeyPath = "/var/run/keys/${sslPrivateKeyNixopsKeyName}";
+    #     tlsPem = ./example-secrets/pki/example-gluster-server-cert.pem;
+    #   };
+    #   glusterServiceSettings = {
+    #     # logLevel = "DEBUG";
+    #   };
+    #   glusterVolumeName = glusterVolumeName;
+    #   volumeReadySignalConsulKey = "nh2.distfs.${glusterVolumeName}.ready";
+    #   brickFsPath = brickFsPath;
+    #   numReplicas = numReplicas;
+    #   sslAllows = sslAllows;
+    #   geoReplicationMasterSettings =
+    #     if isGeoReplicationMaster then {
+    #       slaveHosts = geoReplicationMasterSettings.slaveHosts;
+    #       slaveVolumeName = geoReplicationMasterSettings.slaveVolumeName;
+    #       # TODO Use .path here, inline masterToSlaveRootSshPrivateKeyNixopsKeyName into `deployment.keys` above when https://github.com/NixOS/nixops/issues/646 is implemented
+    #       masterToSlaveRootSshPrivateKeyPathOnMasterServer = "/var/run/keys/${masterToSlaveRootSshPrivateKeyNixopsKeyName}";
+    #     } else null;
+    #   geoReplicationSlaveSettings = geoReplicationSlaveSettings;
+    # };
 
-    systemd.services.glusterdDependencies =
-    let
-      deps = [
-        # Wait for tinc VPN to be up
-        (serviceUnitOf config.systemd.services."tinc.${config.services.nh2-tinc.vpnNetworkName}")
-        # Wait for SSL key to be uploaded by nixops
-        "${sslPrivateKeyNixopsKeyName}-key.service"
-      ];
-    in
-    {
-      wantedBy = [ "glusterd.service" ];
-      before = [ "glusterd.service" ];
-      bindsTo = deps;
-      after = deps;
-      serviceConfig = {
-        Type = "simple";
-        ExecStart = ''${pkgs.bash}/bin/bash -c "sleep infinity"'';
-        Restart = "always";
-      };
-    };
+    # systemd.services.glusterdDependencies =
+    # let
+    #   deps = [
+    #     # Wait for tinc VPN to be up
+    #     (serviceUnitOf config.systemd.services."tinc.${config.services.nh2-tinc.vpnNetworkName}")
+    #     # Wait for SSL key to be uploaded by nixops
+    #     "${sslPrivateKeyNixopsKeyName}-key.service"
+    #   ];
+    # in
+    # {
+    #   wantedBy = [ "glusterd.service" ];
+    #   before = [ "glusterd.service" ];
+    #   bindsTo = deps;
+    #   after = deps;
+    #   serviceConfig = {
+    #     Type = "simple";
+    #     ExecStart = ''${pkgs.bash}/bin/bash -c "sleep infinity"'';
+    #     Restart = "always";
+    #   };
+    # };
 
-    systemd.services.pingTest = {
-      wantedBy = [ "multi-user.target" ];
-      requires = [
-        (serviceUnitOf config.systemd.services.consulReady)
-        "${sslPrivateKeyNixopsKeyName}-key.service"
-      ];
-      after = [
-        "network-online.target"
-        (serviceUnitOf config.systemd.services.consulReady)
-        "${sslPrivateKeyNixopsKeyName}-key.service"
-      ];
-      script = ''
-        while true; do
-          ${pkgs.iputils}/bin/ping -i0.2 10.0.0.1
-          sleep 0.2
-        done
-      '';
-      serviceConfig = {
-        Type = "simple";
-        Restart = "always";
-      };
-    };
+    # systemd.services.pingTest = {
+    #   wantedBy = [ "multi-user.target" ];
+    #   requires = [
+    #     (serviceUnitOf config.systemd.services.consulReady)
+    #     "${sslPrivateKeyNixopsKeyName}-key.service"
+    #   ];
+    #   after = [
+    #     "network-online.target"
+    #     (serviceUnitOf config.systemd.services.consulReady)
+    #     "${sslPrivateKeyNixopsKeyName}-key.service"
+    #   ];
+    #   script = ''
+    #     while true; do
+    #       ${pkgs.iputils}/bin/ping -i0.2 10.0.0.1
+    #       sleep 0.2
+    #     done
+    #   '';
+    #   serviceConfig = {
+    #     Type = "simple";
+    #     Restart = "always";
+    #   };
+    # };
 
     # systemd.services.haskellTest = {
     #   wantedBy = [ "multi-user.target" ];
@@ -270,31 +270,31 @@ let
 
     # GlusterFS mount point
 
-    fileSystems."${glusterMountPoint}" = {
-      fsType = "glusterfs";
-      device = "localhost:/${glusterVolumeName}";
-      options =
-        [
-          # "connect-max-retries=-1" # retry to connect indefinitely
-          # "connect-retry-timeout=0.1" # seconds
+    # fileSystems."${glusterMountPoint}" = {
+    #   fsType = "glusterfs";
+    #   device = "localhost:/${glusterVolumeName}";
+    #   options =
+    #     [
+    #       # "connect-max-retries=-1" # retry to connect indefinitely
+    #       # "connect-retry-timeout=0.1" # seconds
 
-          "x-systemd.mount-timeout=5s"
+    #       "x-systemd.mount-timeout=5s"
 
-          # The volume has to be created before we can mount it.
-          "x-systemd.requires=glusterClusterInit.service"
-          "x-systemd-after=glusterClusterInit.service"
+    #       # The volume has to be created before we can mount it.
+    #       "x-systemd.requires=glusterClusterInit.service"
+    #       "x-systemd-after=glusterClusterInit.service"
 
-          # Wait for SSL key to be uploaded by nixops
-          # "x-systemd.requires=${sslPrivateKeyNixopsKeyName}-key.service"
-          # "x-systemd-after=${sslPrivateKeyNixopsKeyName}-key.service"
-        ]
-        # On slaves we mount readonly as one should not write to a geo-replication slave mount;
-        # that would prevent files of the same path to be synced over, even when deleted on
-        # the geo-replication slave afterwards.
-        # Only a delete on the master, and re-creation of the same file seems to fix that,
-        # so we really never want to write to a geo-replication slave.
-        ++ (if isGeoReplicationSlave then [ "ro" ] else []);
-    };
+    #       # Wait for SSL key to be uploaded by nixops
+    #       # "x-systemd.requires=${sslPrivateKeyNixopsKeyName}-key.service"
+    #       # "x-systemd-after=${sslPrivateKeyNixopsKeyName}-key.service"
+    #     ]
+    #     # On slaves we mount readonly as one should not write to a geo-replication slave mount;
+    #     # that would prevent files of the same path to be synced over, even when deleted on
+    #     # the geo-replication slave afterwards.
+    #     # Only a delete on the master, and re-creation of the same file seems to fix that,
+    #     # so we really never want to write to a geo-replication slave.
+    #     ++ (if isGeoReplicationSlave then [ "ro" ] else []);
+    # };
 
   };
 
