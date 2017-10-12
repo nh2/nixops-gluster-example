@@ -5,6 +5,7 @@ This demonstrates an advanced [nixops](https://nixos.org/nixops/) deployment of
 * the [GlusterFS](https://www.gluster.org/) distributed file system
   * a replicated setup across 3 machines in AWS Frankfurt
 * read-only [geo-replication](https://gluster.readthedocs.io/en/latest/Administrator%20Guide/Geo%20Replication/) to another gluster cluster (could be on the other side of the world)
+* mounting the file system from a client-only node
 * use of gluster's [SSL](https://gluster.readthedocs.io/en/latest/Administrator%20Guide/Geo%20Replication/) support for encryption and server/client authentication
 * use of [consul](https://www.consul.io/) to orchestrate volume-initialisation across machines on first boot
 * the whole thing running over the [tinc](http://tinc-vpn.org/) VPN for security
@@ -52,7 +53,7 @@ Run
 
 ```
 nixops create -d gluster-test-deployment '<example-gluster-cluster.nix>'
-env NIX_PATH=.:nixpkgs=https://github.com/nh2/nixpkgs/archive/84ecf175.tar.gz nixops deploy -d gluster-test
+env NIX_PATH=.:nixpkgs=https://github.com/nh2/nixpkgs/archive/84ecf17.tar.gz nixops deploy -d gluster-test-deployment
 ```
 
 This should complete without errors and you should have your gluster cluster ready.

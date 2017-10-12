@@ -1,3 +1,7 @@
+# Note that since NixOS 17.09 this is only necessary for
+# machines that are not at the same time glusterfs servers,
+# because those have `services.glusterfs.tlsSettings`
+# to configure this.
 { config, pkgs, ... }:
 
 with pkgs.lib;
@@ -51,7 +55,7 @@ in {
   config =
   {
 
-    # Service that sets up files that make gluster decide whether to use SSL or not
+    # Service that sets up files that make gluster decide whether to use SSL or not.
 
     systemd.services.glusterRequiredFilesSetup = mkIf cfg.enable {
       wantedBy = [ "multi-user.target" ];

@@ -77,16 +77,35 @@ in {
 
 
     services.consul =
+      let
+        defaultExtraConfig = {
+          bind_addr = config.services.nh2-tinc.vpnIPAddress;
+          inherit retry_interval;
+          performance = {
+            inherit raft_multiplier;
+          };
+          # We want check outputs to be reflected immediately.
+          # Unfortunately due to https://github.com/hashicorp/consul/issues/1057,
+          # "0s" doesn't actually work, so we use "1ns" instead.
+          check_update_interval = "1ns";
+          dns_config = {
+            # TODO Check if this is really necessary.
+            # I found that the consul DNS API returned no results
+            # for a service even when the HTTP API gave results
+            # just before. This option seems to help.
+            allow_stale = false;
+          };
+        };
+      in
       if cfg.isServer
         then
           assert builtins.elem cfg.thisConsensusServerHost cfg.allConsensusServerHosts;
           {
             enable = cfg.enable;
             inherit webUi;
-            extraConfig = {
+            extraConfig = defaultExtraConfig // {
               server = true;
               bootstrap_expect = builtins.length cfg.allConsensusServerHosts;
-              inherit retry_interval;
               retry_join =
                 # If there's only 1 node in the network, we allow self-join;
                 # otherwise, the node must not try to join itself, and join only the other servers.
@@ -94,24 +113,15 @@ in {
                 if builtins.length cfg.allConsensusServerHosts == 1
                   then cfg.allConsensusServerHosts
                   else builtins.filter (h: h != cfg.thisConsensusServerHost) cfg.allConsensusServerHosts;
-              performance = {
-                inherit raft_multiplier;
-              };
-              bind_addr = config.services.nh2-tinc.vpnIPAddress;
             };
           }
         else
           {
             enable = cfg.enable;
             inherit webUi;
-            extraConfig = {
+            extraConfig = defaultExtraConfig // {
               server = false;
-              inherit retry_interval;
               retry_join = cfg.allConsensusServerHosts;
-              performance = {
-                inherit raft_multiplier;
-              };
-              bind_addr = config.services.nh2-tinc.vpnIPAddress;
             };
           };
 
