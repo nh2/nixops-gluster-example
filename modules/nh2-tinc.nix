@@ -168,6 +168,13 @@ in {
         #!/bin/sh
         ${pkgs.nettools}/bin/ifconfig $INTERFACE ${cfg.vpnIPAddress} netmask 255.255.0.0
         ${pkgs.systemd}/bin/systemd-notify --ready
+        # Have to sleep here because systemd cannot act on notify messages
+        # if the sending process (this script) has exited;
+        # see section `NotifyAccess=` from
+        #   https://www.freedesktop.org/software/systemd/man/systemd.service.html
+        # Of course this is racy, but 100ms should be enough for
+        # systemd to process the notification.
+        sleep 0.1
       '';
       mode = "0555";
     };

@@ -12,8 +12,38 @@ let
   consul-scripting-helper = import ../consul-scripting-helper.nix { inherit pkgs; };
   consul-scripting-helper-exe = "${consul-scripting-helper}/bin/consul-scripting-helper";
 
+  # Inspired by https://github.com/NixOS/nixpkgs/blob/3dea1972737f5ce7b2c5461fe20370bad10aae03/nixos/modules/system/boot/systemd.nix#L202
+  makePython3JobScriptWithPythonPackages = name: packagesSelectionFun: text:
+    let
+      shellEscape = (import <nixpkgs/nixos/modules/system/boot/systemd-lib.nix> (with pkgs; { inherit config pkgs lib; })).shellEscape;
+      mkScriptName = s: (builtins.replaceStrings [ "\\" ] [ "-" ] (shellEscape s) );
+      x = pkgs.writeTextFile { name = "unit-script.py"; executable = true; destination = "/bin/${mkScriptName name}"; text = "#!/usr/bin/env python3\n${text}"; };
+      deriv = pkgs.stdenv.mkDerivation {
+        name = mkScriptName name;
+        buildInputs = [ (pkgs.python36.withPackages (pythonPackages: packagesSelectionFun pythonPackages)) ];
+        unpackPhase = "true";
+        installPhase = ''
+          mkdir -p $out/bin
+          cp ${x}/bin/${mkScriptName name} $out/bin/${mkScriptName name}
+        '';
+      };
+    in "${deriv}/bin/${mkScriptName name}";
+
   brickPath = "${cfg.brickFsPath}/brick";
   allMachinesBrickPaths = map (host: "${host}:${brickPath}") cfg.allGlusterServerHosts;
+
+  # Note that ANY use of `gluster volume status` has to be wrapped in a
+  # `lockedCommand`, even if an operator wants to use it in a shell on the machine!
+  # Because not doing so can disturb one of the invocations that we do
+  # (e.g. in the consul check), thus making those invocations break with
+  #   Another transaction is in progress for distfs. Please try again after sometime.
+
+  # Note: Checking when a volume is actually mountable is tricky.
+  # * Checking that glusterd is up is not enough.
+  # * Checking that `gluster volume info` shows `Status: Started` is not enough.
+  #   It seems to flip to that state immediately, even when the brick process
+  #   isn't even started.
+  brickStatusDetailCommand = "${pkgs.glusterfs}/bin/gluster volume status ${cfg.glusterVolumeName} ${cfg.thisGlusterServerHost}:${brickPath} detail";
 
   isGeoReplicationMaster = cfg.geoReplicationMasterSettings != null;
   isGeoReplicationSlave = cfg.geoReplicationSlaveSettings != null;
@@ -21,7 +51,6 @@ in {
 
   imports = [
     ./nh2-consul-ready.nix
-    ./glusterfs-SSL-setup.nix
   ];
 
   options = {
@@ -55,8 +84,8 @@ in {
         example = "10.0.0.1";
       };
 
-      # TODO check if we can re-use the options type from glusterfs-SSL-setup.nix, instead of `mkOption` with `types.attrs`
-      glusterSSLSetup = mkOption {
+      # TODO check if we can re-use the options type from services.glusterfs.tlsSettings, instead of `mkOption` with `types.attrs`
+      glusterTlsSettings = mkOption {
         type = types.attrs;
         description = ''SSL setup options for this GlusterFS node.'';
       };
@@ -64,7 +93,7 @@ in {
       glusterServiceSettings = mkOption {
         type = types.attrs;
         description = ''
-          Extens/overrides (with `//`) the configuration of `services.glusterfs`.
+          Extends/overrides (with `//`) the configuration of `services.glusterfs`.
           Useful to configure e.g. the `logLevel`.
         '';
         example = { logLevel = "DEBUG"; };
@@ -209,6 +238,10 @@ in {
       useRpcbind = false;
       killMode = "control-group";
       stopKillTimeout = "5s";
+      tlsSettings = cfg.glusterTlsSettings;
+      extraFlags = [
+        "--logger=syslog"
+      ];
     } // cfg.glusterServiceSettings;
 
     # Consul needs to be ready for our multi-machine orchestration to work.
@@ -217,36 +250,97 @@ in {
       enable = true;
     };
 
-    # GlusterFS config
+    # TODO this can probably be removed
+    # From `man 5 sudoers`:
+    #   Note that the following characters must be escaped with a ‘\’ if
+    #   they are used in command arguments: ‘,’, ‘:’, ‘=’, ‘\’.
+    security.sudo.extraConfig = ''
+      consul ALL=(root) NOPASSWD: ${builtins.replaceStrings [ "," ":" "=" "\\" ] [ "\\," "\\:" "\\=" "\\\\" ] brickStatusDetailCommand}
+    '';
 
-    # `mkForce` to take priority over any potential gluster
-    # client settings given for mounting.
-    services.glusterfs-SSL-setup = mkForce cfg.glusterSSLSetup;
+    environment.etc."consul.d/gluster-service.json" = rec {
+      text = builtins.toJSON {
+        service = {
+          name = "gluster-volume-${cfg.glusterVolumeName}";
+          address = cfg.thisGlusterServerHost;
+          enableTagOverride = false;
+          checks = [
+            {
+              id = "gluster-volume-${cfg.glusterVolumeName}";
+              # This needs to be high enough so that one
+              # `glusterVolumeRunningCheckWatchdog` loop can complete
+              # (which can take a while because it's wrapped in a lock
+              # and competing with all other such watchdogs), but short
+              # enough so that it gets turned off during a reboot.
+              # When I measured, on a 3 machine cluster with 0.5s ping,
+              # across 500 samples the max time to complete was 5s.
+              ttl = "7s";
+            }
+          ];
+        };
+      };
+    };
+
+    # GlusterFS volume status Consul tracking
+
+    systemd.services.glusterVolumeRunningCheckWatchdog = mkIf cfg.enable {
+      wantedBy = [ "multi-user.target" ];
+      requires = [
+        (serviceUnitOf config.systemd.services.consulReady)
+        (serviceUnitOf config.systemd.services.glusterClusterInit)
+      ];
+      after = [
+        "network-online.target"
+        (serviceUnitOf config.systemd.services.consulReady)
+        (serviceUnitOf config.systemd.services.glusterClusterInit)
+      ];
+      script = ''
+        set -euo pipefail
+        while true; do
+          set +e # As this is a watchdog, we want this to run forever, also on failures
+          ${consul-scripting-helper-exe} lockedCommand --key "glusterfs-${cfg.glusterVolumeName}-command-lock" --shell-command 'set -euo pipefail; ${brickStatusDetailCommand} | grep "^Online.*Y"' --pass-check-id "service:gluster-volume-${cfg.glusterVolumeName}"
+          set -e
+          sleep 1
+        done
+      '';
+      serviceConfig = {
+        Type = "simple";
+        Restart = "always";
+      };
+    };
 
     # GlusterFS initial setup
 
-    # This service is intended to be invoked manually by an operator.
+    # This service is intended to be invoked only at first boot,
+    # or afterwards manually by an operator.
     # Note: You can easily get the full path to this with
     #   echo $(cat $(systemctl status glusterClusterInit | grep -o '/nix/store/.*service') | grep ExecStartPre | cut -d= -f2)
     systemd.services.glusterClusterInit = mkIf cfg.enable {
       wantedBy = [ "multi-user.target" ];
       requires = [
         (serviceUnitOf config.systemd.services.consulReady)
+        # "glusterd.service" # TODO enable this
       ];
       after = [
         "network-online.target"
         (serviceUnitOf config.systemd.services.consulReady)
+        # "glusterd.service" # TODO enable this
       ];
       preStart =
       let
         numPeers = builtins.length cfg.allGlusterServerHosts;
       in
       ''
-        # We glusterfs commands don't like being run in parallel ("Locking failed" error message),
+        set -euo pipefail
+
+        # Glusterfs commands don't like being run in parallel ("Locking failed" error message),
         # that's why we serialise them with `lockedCommand`.
 
         echo "Check whether volume '${cfg.glusterVolumeName}' already exists; exiting early if so..."
-        ${consul-scripting-helper-exe} lockedCommand --key "glusterfs-${cfg.glusterVolumeName}-command-lock" --shell-command '${pkgs.glusterfs}/bin/gluster volume status ${cfg.glusterVolumeName}' && echo "Exiting because volume already exists" && exit 0
+        # Note: This && early exit relies on consul-scripting-helper exiting only with the exit code
+        # of the given --shell-command; if it exited by itself (bug), then we would incorrectly
+        # continue with the script instead of exiting early.
+        ${consul-scripting-helper-exe} --verbose lockedCommand --key "glusterfs-${cfg.glusterVolumeName}-command-lock" --shell-command '${pkgs.glusterfs}/bin/gluster volume status ${cfg.glusterVolumeName}' && echo "Exiting because volume already exists" && exit 0
 
         echo "Waiting for all machines to be up before probing..."
         ${consul-scripting-helper-exe} counterIncrement --key "glusterfs-${cfg.glusterVolumeName}-machine-up-counter"
