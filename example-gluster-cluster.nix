@@ -1,6 +1,3 @@
-# Warning: Do NOT run this example on the open Internet.
-# Services like Consul are not access protected in this example.
-
 let
 
   glusterMountPoint = "/glustermount";
