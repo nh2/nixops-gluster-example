@@ -29,14 +29,9 @@ let
       # ];
     });
 
-    # TODO: Patch that here once https://github.com/NixOS/nixpkgs/issues/30353 is clear
-    # systemd = pkgs.lib.overrideDerivation (pkgs.lib.makeOverridable pkgs.systemd) (oldAttrs: rec {
-    #   patches = oldAttrs.patches ++ [
-    #     ./systemd-Set-BUS_DEFAULT_TIMEOUT-to-1-second.patch
-    #   ];
-    # });
-
   };
+
+  useNixCopyClosure = true;
 
   gluster-node = {
     hostName,
@@ -71,18 +66,20 @@ let
   in rec {
 
     deployment.targetEnv = "ec2";
-    deployment.ec2.accessKeyId = "nh2-nixops"; # symbolic name looked up in ~/.ec2-keys or a ~/.aws/credentials profile name
+    deployment.ec2.accessKeyId = "benaco-nixops"; # symbolic name looked up in ~/.ec2-keys or a ~/.aws/credentials profile name
     deployment.ec2.region = "eu-central-1";
     deployment.ec2.instanceType = "t2.small";
     deployment.ec2.keyPair = "niklas";
     deployment.ec2.ebsBoot = true;
     deployment.ec2.ebsInitialRootDiskSize = 20;
 
+    deployment.hasFastConnection = useNixCopyClosure;
+
     imports = [
       ./modules/nh2-tinc.nix
       ./modules/nh2-consul-over-tinc.nix
       ./modules/nh2-openssl-dhparams.nix
-      # ./modules/nh2-glusterfs-server.nix
+      ./modules/nh2-glusterfs-server.nix
     ];
 
     nixpkgs.config.packageOverrides = packageOverrides;
@@ -93,10 +90,6 @@ let
       formatOptions = "-i size=512";
       device = "/dev/xvdf";
       ec2.size = 1; # in GB
-      options = [
-        "x-systemd.requires=${sslPrivateKeyNixopsKeyName}-key.service"
-        # "x-systemd.requires=dhcpcd.service"
-      ];
     };
 
     # Don't enable `autoUpgrade` because according to `clever` on IRC, it breaks
@@ -155,7 +148,10 @@ let
 
     # To avoid dhparams errors in gluster logs.
     # See https://bugzilla.redhat.com/show_bug.cgi?id=1398237
-    services.nh2-openssl-dhparams.enable = true;
+    services.nh2-openssl-dhparams = {
+      enable = true;
+      before = [ "glusterd.service" ];
+    };
 
     # GlusterFS
 
@@ -166,65 +162,63 @@ let
       text = builtins.readFile ./example-secrets/glusterfs/nh2-gluster-georep-ssh-key;
     };
 
-    # services.nh2-gluster-server = {
-    #   enable = true;
-    #   allGlusterServerHosts = glusterClusterHosts;
-    #   thisGlusterServerHost = vpnIPAddress;
-    #   glusterTlsSettings = {
-    #     caCert = ./example-secrets/pki/example-root-ca-cert.pem;
-    #     # TODO Use .path here, inline sslPrivateKeyNixopsKeyName into `deployment.keys` above when https://github.com/NixOS/nixops/issues/646 is implemented
-    #     tlsKeyPath = "/var/run/keys/${sslPrivateKeyNixopsKeyName}";
-    #     tlsPem = ./example-secrets/pki/example-gluster-server-cert.pem;
-    #   };
-    #   glusterServiceSettings = {
-    #     # logLevel = "DEBUG";
-    #   };
-    #   glusterVolumeName = glusterVolumeName;
-    #   volumeReadySignalConsulKey = "nh2.distfs.${glusterVolumeName}.ready";
-    #   brickFsPath = brickFsPath;
-    #   numReplicas = numReplicas;
-    #   sslAllows = sslAllows;
-    #   geoReplicationMasterSettings =
-    #     if isGeoReplicationMaster then {
-    #       slaveHosts = geoReplicationMasterSettings.slaveHosts;
-    #       slaveVolumeName = geoReplicationMasterSettings.slaveVolumeName;
-    #       # TODO Use .path here, inline masterToSlaveRootSshPrivateKeyNixopsKeyName into `deployment.keys` above when https://github.com/NixOS/nixops/issues/646 is implemented
-    #       masterToSlaveRootSshPrivateKeyPathOnMasterServer = "/var/run/keys/${masterToSlaveRootSshPrivateKeyNixopsKeyName}";
-    #     } else null;
-    #   geoReplicationSlaveSettings = geoReplicationSlaveSettings;
-    # };
+    services.nh2-gluster-server = {
+      enable = true;
+      allGlusterServerHosts = glusterClusterHosts;
+      thisGlusterServerHost = vpnIPAddress;
+      glusterTlsSettings = {
+        caCert = ./example-secrets/pki/example-root-ca-cert.pem;
+        # TODO Use .path here, inline sslPrivateKeyNixopsKeyName into `deployment.keys` above when https://github.com/NixOS/nixops/issues/646 is implemented
+        tlsKeyPath = "/var/run/keys/${sslPrivateKeyNixopsKeyName}";
+        tlsPem = ./example-secrets/pki/example-gluster-server-cert.pem;
+      };
+      glusterServiceSettings = {
+        # logLevel = "DEBUG";
+      };
+      glusterVolumeName = glusterVolumeName;
+      volumeReadySignalConsulKey = "nh2.distfs.${glusterVolumeName}.ready";
+      brickFsPath = brickFsPath;
+      numReplicas = numReplicas;
+      sslAllows = sslAllows;
+      geoReplicationMasterSettings =
+        if isGeoReplicationMaster then {
+          slaveHosts = geoReplicationMasterSettings.slaveHosts;
+          slaveVolumeName = geoReplicationMasterSettings.slaveVolumeName;
+          # TODO Use .path here, inline masterToSlaveRootSshPrivateKeyNixopsKeyName into `deployment.keys` above when https://github.com/NixOS/nixops/issues/646 is implemented
+          masterToSlaveRootSshPrivateKeyPathOnMasterServer = "/var/run/keys/${masterToSlaveRootSshPrivateKeyNixopsKeyName}";
+        } else null;
+      geoReplicationSlaveSettings = geoReplicationSlaveSettings;
+    };
 
-    # systemd.services.glusterdDependencies =
-    # let
-    #   deps = [
-    #     # Wait for tinc VPN to be up
-    #     (serviceUnitOf config.systemd.services."tinc.${config.services.nh2-tinc.vpnNetworkName}")
-    #     # Wait for SSL key to be uploaded by nixops
-    #     "${sslPrivateKeyNixopsKeyName}-key.service"
-    #   ];
-    # in
-    # {
-    #   wantedBy = [ "glusterd.service" ];
-    #   before = [ "glusterd.service" ];
-    #   bindsTo = deps;
-    #   after = deps;
-    #   serviceConfig = {
-    #     Type = "simple";
-    #     ExecStart = ''${pkgs.bash}/bin/bash -c "sleep infinity"'';
-    #     Restart = "always";
-    #   };
-    # };
+    systemd.services.glusterdDependencies =
+    let
+      deps = [
+        # Wait for tinc VPN to be up
+        (serviceUnitOf config.systemd.services."tinc.${config.services.nh2-tinc.vpnNetworkName}")
+        # Wait for SSL key to be uploaded by nixops
+        "${sslPrivateKeyNixopsKeyName}-key.service"
+      ];
+    in
+    {
+      wantedBy = [ "glusterd.service" ];
+      before = [ "glusterd.service" ];
+      bindsTo = deps;
+      after = deps;
+      serviceConfig = {
+        Type = "simple";
+        ExecStart = ''${pkgs.bash}/bin/bash -c "sleep infinity"'';
+        Restart = "always";
+      };
+    };
 
     # systemd.services.pingTest = {
     #   wantedBy = [ "multi-user.target" ];
     #   requires = [
     #     (serviceUnitOf config.systemd.services.consulReady)
-    #     "${sslPrivateKeyNixopsKeyName}-key.service"
     #   ];
     #   after = [
     #     "network-online.target"
     #     (serviceUnitOf config.systemd.services.consulReady)
-    #     "${sslPrivateKeyNixopsKeyName}-key.service"
     #   ];
     #   script = ''
     #     while true; do
@@ -258,43 +252,33 @@ let
     #   };
     # };
 
-    # services.dbus.enable = false;
-    # services.dbus.socketActivated = true;
-
-    boot.kernelParams = [
-      "systemd.log_level=debug"
-      "systemd.log_target=kmsg"
-      "log_buf_len=1M"
-      "printk.devkmsg=on"
-    ];
-
     # GlusterFS mount point
 
-    # fileSystems."${glusterMountPoint}" = {
-    #   fsType = "glusterfs";
-    #   device = "localhost:/${glusterVolumeName}";
-    #   options =
-    #     [
-    #       # "connect-max-retries=-1" # retry to connect indefinitely
-    #       # "connect-retry-timeout=0.1" # seconds
+    fileSystems."${glusterMountPoint}" = {
+      fsType = "glusterfs";
+      device = "localhost:/${glusterVolumeName}";
+      options =
+        [
+          # "connect-max-retries=-1" # retry to connect indefinitely
+          # "connect-retry-timeout=0.1" # seconds
 
-    #       "x-systemd.mount-timeout=5s"
+          "x-systemd.mount-timeout=5s"
 
-    #       # The volume has to be created before we can mount it.
-    #       "x-systemd.requires=glusterClusterInit.service"
-    #       "x-systemd-after=glusterClusterInit.service"
+          # The volume has to be created before we can mount it.
+          "x-systemd.requires=glusterClusterInit.service"
+          "x-systemd-after=glusterClusterInit.service"
 
-    #       # Wait for SSL key to be uploaded by nixops
-    #       # "x-systemd.requires=${sslPrivateKeyNixopsKeyName}-key.service"
-    #       # "x-systemd-after=${sslPrivateKeyNixopsKeyName}-key.service"
-    #     ]
-    #     # On slaves we mount readonly as one should not write to a geo-replication slave mount;
-    #     # that would prevent files of the same path to be synced over, even when deleted on
-    #     # the geo-replication slave afterwards.
-    #     # Only a delete on the master, and re-creation of the same file seems to fix that,
-    #     # so we really never want to write to a geo-replication slave.
-    #     ++ (if isGeoReplicationSlave then [ "ro" ] else []);
-    # };
+          # Wait for SSL key to be uploaded by nixops
+          "x-systemd.requires=${sslPrivateKeyNixopsKeyName}-key.service"
+          "x-systemd-after=${sslPrivateKeyNixopsKeyName}-key.service"
+        ]
+        # On slaves we mount readonly as one should not write to a geo-replication slave mount;
+        # that would prevent files of the same path to be synced over, even when deleted on
+        # the geo-replication slave afterwards.
+        # Only a delete on the master, and re-creation of the same file seems to fix that,
+        # so we really never want to write to a geo-replication slave.
+        ++ (if isGeoReplicationSlave then [ "ro" ] else []);
+    };
 
   };
 
@@ -320,12 +304,14 @@ let
   {
 
     deployment.targetEnv = "ec2";
-    deployment.ec2.accessKeyId = "nh2-nixops"; # symbolic name looked up in ~/.ec2-keys or a ~/.aws/credentials profile name
+    deployment.ec2.accessKeyId = "benaco-nixops"; # symbolic name looked up in ~/.ec2-keys or a ~/.aws/credentials profile name
     deployment.ec2.region = "eu-central-1";
     deployment.ec2.instanceType = "t2.small";
     deployment.ec2.keyPair = "niklas";
     deployment.ec2.ebsBoot = true;
     deployment.ec2.ebsInitialRootDiskSize = 20;
+
+    deployment.hasFastConnection = useNixCopyClosure;
 
     imports = [
       ./modules/nh2-tinc.nix
@@ -385,7 +371,10 @@ let
 
     # To avoid dhparams errors in gluster logs.
     # See https://bugzilla.redhat.com/show_bug.cgi?id=1398237
-    services.nh2-openssl-dhparams.enable = true;
+    services.nh2-openssl-dhparams = {
+      enable = true;
+      before = [ "glusterd.service" ];
+    };
 
     # GlusterFS mount point
 
@@ -412,6 +401,13 @@ let
       enable = true;
     };
 
+    boot.kernelParams = [
+      "systemd.log_level=debug"
+      "systemd.log_target=kmsg"
+      "log_buf_len=1M"
+      "printk.devkmsg=on"
+    ];
+
     systemd.services.glusterReadyForClientMount = {
       wantedBy = [ "multi-user.target" ];
       requires = [
@@ -434,6 +430,7 @@ let
       };
     };
 
+    # Bad (can result in `pam_systemd(sshd:session): Failed to create session: Connection timed out`)
     fileSystems."${glusterMountPoint}" = {
       fsType = "glusterfs";
       device = "gluster-volume-${glusterVolumeName}.service.consul:/${glusterVolumeName}";

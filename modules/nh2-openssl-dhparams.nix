@@ -22,6 +22,15 @@ in {
         '';
       };
 
+      before = mkOption {
+        type = types.listOf types.str;
+        default = [];
+        description = ''
+          List of systemd units that should be started after
+          dhparam.pem has been generated.
+        '';
+      };
+
     };
 
   };
@@ -34,10 +43,12 @@ in {
       # the file) and before the network is ready (because it is
       # typically networking services that care about dhparams).
 
-      after = [ "local-fs.target" ]; # TODO
-      before = [ "network-setup.service" ]; # TODO
+      # after = [ "local-fs.target" ]; # TODO
+      # before = [ "network-setup.service" ]; # TODO
+      before = cfg.before;
 
       unitConfig = {
+        RequiresMountsFor = "/etc/ssl";
         ConditionPathExists = "!/etc/ssl/dhparam.pem";
       };
       serviceConfig = {
