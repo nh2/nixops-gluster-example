@@ -430,35 +430,59 @@ let
       };
     };
 
+    # Good
+    systemd.mounts = [
+      (
+        let
+          deps = [
+            (serviceUnitOf config.systemd.services.glusterRequiredFilesSetup)
+            (serviceUnitOf config.systemd.services.glusterReadyForClientMount)
+            # TODO Do this once glusterfs-SSL-setup takes a path to a nixops key
+            # Wait for SSL key to be uploaded by nixops
+            "${sslPrivateKeyNixopsKeyName}-key.service"
+          ];
+        in
+        {
+          wantedBy = [ "multi-user.target" ];
+          what = "gluster-volume-${glusterVolumeName}.service.consul:/${glusterVolumeName}";
+          where = glusterMountPoint;
+          type = "glusterfs";
+          options = "backup-volfile-servers=${pkgs.lib.concatStringsSep ":" glusterServerHosts} log-level=DEBUG ";
+          requires = deps;
+          after = deps;
+        }
+      )
+    ];
+
     # Bad (can result in `pam_systemd(sshd:session): Failed to create session: Connection timed out`)
-    fileSystems."${glusterMountPoint}" = {
-      fsType = "glusterfs";
-      device = "gluster-volume-${glusterVolumeName}.service.consul:/${glusterVolumeName}";
-      options =
-        [
-          # "connect-max-retries=-1" # retry to connect indefinitely
-          # "connect-retry-timeout=0.1" # seconds
+    # fileSystems."${glusterMountPoint}" = {
+    #   fsType = "glusterfs";
+    #   device = "gluster-volume-${glusterVolumeName}.service.consul:/${glusterVolumeName}";
+    #   options =
+    #     [
+    #       # "connect-max-retries=-1" # retry to connect indefinitely
+    #       # "connect-retry-timeout=0.1" # seconds
 
-          "backup-volfile-servers=${pkgs.lib.concatStringsSep ":" glusterServerHosts}"
+    #       "backup-volfile-servers=${pkgs.lib.concatStringsSep ":" glusterServerHosts}"
 
-          "log-level=DEBUG"
+    #       "log-level=DEBUG"
 
-          "x-systemd.mount-timeout=5s"
+    #       "x-systemd.mount-timeout=5s"
 
-          # Wait for log directory etc to be created.
-          "x-systemd.requires=${serviceUnitOf config.systemd.services.glusterRequiredFilesSetup}"
-          "x-systemd-after=${serviceUnitOf config.systemd.services.glusterRequiredFilesSetup}"
+    #       # Wait for log directory etc to be created.
+    #       "x-systemd.requires=${serviceUnitOf config.systemd.services.glusterRequiredFilesSetup}"
+    #       "x-systemd-after=${serviceUnitOf config.systemd.services.glusterRequiredFilesSetup}"
 
-          # Wait for glusterfs server signalling the volume had been created.
-          "x-systemd.requires=${serviceUnitOf config.systemd.services.glusterReadyForClientMount}"
-          "x-systemd-after=${serviceUnitOf config.systemd.services.glusterReadyForClientMount}"
+    #       # Wait for glusterfs server signalling the volume had been created.
+    #       "x-systemd.requires=${serviceUnitOf config.systemd.services.glusterReadyForClientMount}"
+    #       "x-systemd-after=${serviceUnitOf config.systemd.services.glusterReadyForClientMount}"
 
-          # TODO Do this once glusterfs-SSL-setup takes a path to a nixops key
-          # Wait for SSL key to be uploaded by nixops
-          # "x-systemd.requires=${sslPrivateKeyNixopsKeyName}-key.service"
-          # "x-systemd-after=${sslPrivateKeyNixopsKeyName}-key.service"
-        ];
-    };
+    #       # TODO Do this once glusterfs-SSL-setup takes a path to a nixops key
+    #       # Wait for SSL key to be uploaded by nixops
+    #       # "x-systemd.requires=${sslPrivateKeyNixopsKeyName}-key.service"
+    #       # "x-systemd-after=${sslPrivateKeyNixopsKeyName}-key.service"
+    #     ];
+    # };
   };
 
   # For EC2, we use the private IP to connect tinc nodes.
