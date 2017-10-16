@@ -36,10 +36,13 @@ in {
         example = "-----BEGIN CERTIFICATE-----\n...";
       };
 
-      privateKey = mkOption {
+      privateKeyPath = mkOption {
         type = types.str;
-        description = ''Contents of the private key used for encryption and authentication.'';
-        example = "-----BEGIN PRIVATE KEY-----\n...";
+        description = ''
+          Path on the target machine to the private key used for encryption and authentication.
+          This is not the key contents so that they don't go into the (world-readable) nix store.
+        '';
+        example = "/var/run/keys/gluster-key.pem";
       };
 
       certificate = mkOption {
@@ -88,7 +91,7 @@ in {
 
     environment.etc.glusterSSLcertsPrivateKey = mkIf cfg.enable {
       target = "ssl/glusterfs.key";
-      text = cfg.privateKey;
+      source = cfg.privateKeyPath;
     };
 
     environment.etc.glusterSSLcertsCert = mkIf cfg.enable {

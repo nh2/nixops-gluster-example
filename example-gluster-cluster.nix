@@ -413,14 +413,16 @@ let
 
     # GlusterFS mount point
 
+    deployment.keys."${sslPrivateKeyNixopsKeyName}" = {
+      text = builtins.readFile ./example-secrets/pki/example-gluster-server-privkey.pem;
+    };
+
     services.glusterfs-SSL-setup = {
       enable = true;
       glusterSSLcertsCA = builtins.readFile example-secrets/pki/example-root-ca-cert.pem;
 
       # TODO Use .path here, inline sslPrivateKeyNixopsKeyName into `deployment.keys` above when https://github.com/NixOS/nixops/issues/646 is implemented
-      # privateKeyPath = "/var/run/keys/${sslPrivateKeyNixopsKeyName}";
-      # TODO Use nixops keys + a file path for this instead
-      privateKey = builtins.readFile example-secrets/pki/example-gluster-server-privkey.pem;
+      privateKeyPath = "/var/run/keys/${sslPrivateKeyNixopsKeyName}";
 
       certificate = builtins.readFile example-secrets/pki/example-gluster-server-cert.pem;
     };
