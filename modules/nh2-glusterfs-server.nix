@@ -294,17 +294,29 @@ in {
     # or afterwards manually by an operator.
     # Note: You can easily get the full path to this with
     #   echo $(cat $(systemctl status glusterClusterInit | grep -o '/nix/store/.*service') | grep ExecStartPre | cut -d= -f2)
-    systemd.services.glusterClusterInit = mkIf cfg.enable {
+    systemd.services.glusterClusterInit =
+    let
+      deps = [
+        (serviceUnitOf config.systemd.services.consulReady)
+        # Note: Racy. Waiting for glusterd.service doesn't currently
+        #       guarantee that it's actually listening to requests yet,
+        #       and as a result of that the "volume status" below
+        #       can still fail due to that, and thus the rest
+        #       of the script can incorrectly come to the conclusion
+        #       that this means "glusterd is up but the volume hasn't
+        #       been created yet, so I should create it" (at which
+        #       it will hang "waiting for all machines to be up").
+        #       But this race is relatively rare.
+        #       A better solution would distinguish glusterd being down
+        #       from the volume not existing, instead of relying only
+        #       on a non-zero exit code from "gluster volume status".
+        "glusterd.service"
+      ];
+    in
+    mkIf cfg.enable {
       wantedBy = [ "multi-user.target" ];
-      requires = [
-        (serviceUnitOf config.systemd.services.consulReady)
-        # "glusterd.service" # TODO enable this
-      ];
-      after = [
-        "network-online.target"
-        (serviceUnitOf config.systemd.services.consulReady)
-        # "glusterd.service" # TODO enable this
-      ];
+      requires = deps;
+      after = deps;
       preStart =
       let
         numPeers = builtins.length cfg.allGlusterServerHosts;
