@@ -487,8 +487,9 @@ in {
               cp -p "${cfg.geoReplicationMasterSettings.masterToSlaveRootSshPrivateKeyPathOnMasterServer}" /root/.ssh/id_rsa
 
               echo "Creating geo-replication"
+              # The "create push-pem" can fail with "Another transaction is in progress for ${cfg.glusterVolumeName}" so we need to put it into a lock.
               set -x
-              ${pkgs.glusterfs}/bin/gluster volume geo-replication ${cfg.glusterVolumeName} ${firstSlaveHostName}::${cfg.geoReplicationMasterSettings.slaveVolumeName} create push-pem
+              ${consul-scripting-helper-exe} lockedCommand --key "glusterfs-${cfg.glusterVolumeName}-command-lock" --shell-command '${pkgs.glusterfs}/bin/gluster volume geo-replication ${cfg.glusterVolumeName} ${firstSlaveHostName}::${cfg.geoReplicationMasterSettings.slaveVolumeName} create push-pem'
               ${pkgs.glusterfs}/bin/gluster volume geo-replication ${cfg.glusterVolumeName} ${firstSlaveHostName}::${cfg.geoReplicationMasterSettings.slaveVolumeName} start
               set +x
 
