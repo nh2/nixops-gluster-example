@@ -58,16 +58,16 @@ env NIX_PATH=.:nixpkgs=https://github.com/nh2/nixpkgs/archive/4b6f050.tar.gz nix
 
 This should complete without errors and you should have your gluster cluster ready.
 
-(To destroy it when you're done, use `nixops destroy -d gluster-test --confirm`, otherwise you keep paying for the machines.)
+(To destroy it when you're done, use `nixops destroy -d gluster-test-deployment --confirm`, otherwise you keep paying for the machines.)
 
 
 ### Testing the distributed file system
 
 Open 3 terminals to 3 different machines:
 
-* `nixops ssh -d gluster-test gluster-cluster-1`
-* `nixops ssh -d gluster-test gluster-cluster-2 -t 'watch -n0.1 ls /glustermount'`
-* `nixops ssh -d gluster-test gluster-georep-1  -t 'watch -n0.1 ls /glustermount'`
+* `nixops ssh -d gluster-test-deployment gluster-cluster-1`
+* `nixops ssh -d gluster-test-deployment gluster-cluster-2 -t 'watch -n0.1 ls /glustermount'`
+* `nixops ssh -d gluster-test-deployment gluster-georep-1  -t 'watch -n0.1 ls /glustermount'`
 
 Then in the first terminal, run `touch /glustermount/hello`.
 
