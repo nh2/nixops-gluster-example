@@ -44,9 +44,6 @@ let
           else [
             (serviceUnitOf config.systemd.services.glusterRequiredFilesSetup)
             (serviceUnitOf config.systemd.services.glusterReadyForClientMount)
-            # TODO Do this once glusterfs-SSL-setup takes a path to a nixops key
-            # Wait for SSL key to be uploaded by nixops
-            # "${sslPrivateKeyNixopsKeyName}-key.service"
           ];
     in
     {
@@ -238,6 +235,12 @@ let
         } else null;
       geoReplicationSlaveSettings = geoReplicationSlaveSettings;
     };
+    systemd.services.glusterd.requires = [
+      (serviceUnitOf config.systemd.services."${sslPrivateKeyNixopsKeyName}-key")
+    ] ++ pkgs.lib.optional isGeoReplicationMaster (serviceUnitOf config.systemd.services."${masterToSlaveRootSshPrivateKeyNixopsKeyName}-key");
+    systemd.services.glusterd.after = [
+      (serviceUnitOf config.systemd.services."${sslPrivateKeyNixopsKeyName}-key")
+    ] ++ pkgs.lib.optional isGeoReplicationMaster (serviceUnitOf config.systemd.services."${masterToSlaveRootSshPrivateKeyNixopsKeyName}-key");
 
     systemd.services.glusterdDependencies =
     let
@@ -426,6 +429,15 @@ let
 
       certificate = builtins.readFile example-secrets/pki/example-gluster-server-cert.pem;
     };
+    # We need to wait for the nixops key to be uploaded before
+    # we can start the `glusterRequiredFilesSetup` service provided
+    # by `glusterfs-SSL-setup`.
+    systemd.services.glusterRequiredFilesSetup.requires = [
+      (serviceUnitOf config.systemd.services."${sslPrivateKeyNixopsKeyName}-key")
+    ];
+    systemd.services.glusterRequiredFilesSetup.after = [
+      (serviceUnitOf config.systemd.services."${sslPrivateKeyNixopsKeyName}-key")
+    ];
 
     services.nh2-consul-ready = {
       enable = true;
