@@ -214,8 +214,7 @@ let
       thisGlusterServerHost = vpnIPAddress;
       glusterTlsSettings = {
         caCert = ./example-secrets/pki/example-root-ca-cert.pem;
-        # TODO Use .path here, inline sslPrivateKeyNixopsKeyName into `deployment.keys` above when https://github.com/NixOS/nixops/issues/646 is implemented
-        tlsKeyPath = "/var/run/keys/${sslPrivateKeyNixopsKeyName}";
+        tlsKeyPath = config.deployment.keys."${sslPrivateKeyNixopsKeyName}".path;
         tlsPem = ./example-secrets/pki/example-gluster-server-cert.pem;
       };
       glusterServiceSettings = {
@@ -230,8 +229,7 @@ let
         if isGeoReplicationMaster then {
           slaveHosts = geoReplicationMasterSettings.slaveHosts;
           slaveVolumeName = geoReplicationMasterSettings.slaveVolumeName;
-          # TODO Use .path here, inline masterToSlaveRootSshPrivateKeyNixopsKeyName into `deployment.keys` above when https://github.com/NixOS/nixops/issues/646 is implemented
-          masterToSlaveRootSshPrivateKeyPathOnMasterServer = "/var/run/keys/${masterToSlaveRootSshPrivateKeyNixopsKeyName}";
+          masterToSlaveRootSshPrivateKeyPathOnMasterServer = config.deployment.keys."${masterToSlaveRootSshPrivateKeyNixopsKeyName}".path;
         } else null;
       geoReplicationSlaveSettings = geoReplicationSlaveSettings;
     };
@@ -424,8 +422,7 @@ let
       enable = true;
       glusterSSLcertsCA = builtins.readFile example-secrets/pki/example-root-ca-cert.pem;
 
-      # TODO Use .path here, inline sslPrivateKeyNixopsKeyName into `deployment.keys` above when https://github.com/NixOS/nixops/issues/646 is implemented
-      privateKeyPath = "/var/run/keys/${sslPrivateKeyNixopsKeyName}";
+      privateKeyPath = config.deployment.keys."${sslPrivateKeyNixopsKeyName}".path;
 
       certificate = builtins.readFile example-secrets/pki/example-gluster-server-cert.pem;
     };
